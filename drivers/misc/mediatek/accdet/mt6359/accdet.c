@@ -2636,6 +2636,10 @@ static int accdet_get_dts_data(void)
 	of_property_read_u32(node, "accdet-mic-vol", &accdet_dts.mic_vol);
 	of_property_read_u32(node, "accdet-plugout-debounce",
 			&accdet_dts.plugout_deb);
+	/* Fronx: bootloader supplies its own dtb (debounce=1 in stock LK tree),
+	 * so the evergo.dts fix can never take effect — force 100ms here to stop
+	 * jack-detect flapping that storms the spatializer (see SpatialAudio). */
+	accdet_dts.plugout_deb = 100;
 	of_property_read_u32(node, "accdet-mic-mode", &accdet_dts.mic_mode);
 
 	pr_info("accdet mic_vol=%d, plugout_deb=%d mic_mode=%d\n",
