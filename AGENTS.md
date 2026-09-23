@@ -1,10 +1,10 @@
-# AGENTS.md — Aqua Kernel (Xiaomi POCO M4 Pro 5G / Redmi Note 11S 5G)
+# AGENTS.md — Fronx Kernel (Xiaomi POCO M4 Pro 5G / Redmi Note 11S 5G)
 
-> **Master AI Agent Operational & Architectural Specification for Aqua Kernel**
+> **Master AI Agent Operational & Architectural Specification for Fronx Kernel**
 > Target Device: **Xiaomi POCO M4 Pro 5G / Redmi Note 11S 5G (`everpal`)**
 > Target SoC: **MediaTek Dimensity 810 5G (MT6833P / MT6833 family)**
 > Target OS: **Android 16** (Project Infinity-X / LineageOS 23.0 base)
-> Kernel Version: **Linux 4.14.357-Aqua SMP PREEMPT**
+> Kernel Version: **Linux 4.14.357-FronxKernel_<IST-stamp> SMP PREEMPT** (vanilla base reports Addster's `4.14.357-Aqua`; branded builds append `FronxKernel`)
 > Repository Remote: `https://github.com/FrontlXOX/android_kernel_xiaomi_mt6833`
 > Upstream Maintainer: **Addster09** | Android 16 Bringup: **himanshuksr0007** | Optimization Maintainer: **FrontlXOX**
 
@@ -12,7 +12,7 @@
 
 ## 1. Architecture & Base Specifications
 
-This kernel repository is the authoritative source for the Aqua Kernel on `everpal`. It is built upon Addster's **Aqua V3.4** baseline (`lineage-24.0-old` / git tag `AquaV3.4` at `d81fee89be1c86979a2421933a0741f55918cc44`).
+This kernel repository is the authoritative source for the Fronx Kernel on `everpal`. It is built upon Addster's **Aqua V3.4** baseline (`lineage-24.0-old` / git tag `AquaV3.4` at `d81fee89be1c86979a2421933a0741f55918cc44`) — "Aqua" below always refers to that upstream baseline; our product identity is "Fronx" (§3 companion patch).
 
 ### Core Backports & Performance Features
 - **WALT Scheduler:** `CONFIG_SCHED_WALT=y` enabled with window-assisted load tracking.
@@ -99,12 +99,19 @@ Version comes from the `VERSION` file (current: `1.0`, bump per release); timest
 
 ### Manual Build Instructions
 ```bash
-export PATH="$HOME/toolchains/ZyC-clang-22.0.0/bin:$PATH"
+# Toolchain: contained copy inside the EverpalTweaks checkout first, legacy $HOME fallback (mirrors build.sh).
+# EVERPAL = your EverpalTweaks checkout path (e.g. /root/EverpalTweaks).
+if [ -d "$EVERPAL/build/toolchains/ZyC-clang-22.0.0" ]; then
+  export PATH="$EVERPAL/build/toolchains/ZyC-clang-22.0.0/bin:$PATH"
+else
+  export PATH="$HOME/toolchains/ZyC-clang-22.0.0/bin:$PATH"
+fi
+export DT=$(TZ=Asia/Kolkata date '+%Y%m%d-%H%M')   # IST stamp, shared by all artifacts of the run
 
 # 1. Configure
 make O=out ARCH=arm64 everpal_defconfig
 
-# 2. Compile
+# 2. Compile (FROnxDT stamps uname as 4.14.357-FronxKernel_<DT>; omit for unbranded local builds)
 make -j$(nproc) O=out \
     ARCH=arm64 \
     CC="ccache clang" \
@@ -114,6 +121,7 @@ make -j$(nproc) O=out \
     CROSS_COMPILE=aarch64-linux-gnu- \
     CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
     KCFLAGS="-Wno-error=default-const-init-var-unsafe" \
+    FROnxDT="$DT" \
     Image.gz dtbs
 ```
 
@@ -135,7 +143,13 @@ make -j$(nproc) O=out \
 
 The vanilla-default model makes upstream syncs trivial: our root customizations live in normal commits on a vanilla base, and all root-related code lives in `ResukiSU-SusFS.patch`. Syncing Addster never requires untangling hand-ported KSU commits.
 
-**Remotes:** `addster` = Addster09 (upstream), `frontlxox` = our fork (push target), `origin` = himanshuksr0007 (Goku, legacy — do not push here).
+**Remotes (verify names first — fresh clones only have `origin`):**
+```bash
+git remote -v   # expect origin → FrontlXOX (our fork, push target)
+# If the upstream remote is missing, add it (name it addster):
+git remote add addster https://github.com/Addster09/android_kernel_xiaomi_mt6833.git
+git fetch addster
+```
 
 ```bash
 # 0. Start from a clean vanilla tree (non-negotiable):
@@ -157,7 +171,7 @@ git apply --exclude=.gitignore ResukiSU-SusFS.patch
 ./build.sh --with-ksu       # KSU build log must show all hooks found, zero "build maybe broken" warnings
 git apply -R --exclude=.gitignore ResukiSU-SusFS.patch   # back to vanilla
 git status --short          # must be empty again
-git push frontlxox lineage-24.0
+git push origin lineage-24.0   # push target is the FrontlXOX fork (remote may be named origin or frontlxox — check `git remote -v`)
 ```
 
 ---
@@ -191,6 +205,8 @@ git add ResukiSU-SusFS.patch && git commit -m "🦋 [FEAT]: update ResukiSU-SusF
 **Bumping the ReSukiSU driver pin** (current: `f1dd81dc`): `git -C KernelSU checkout <new-sha>`, rebuild KSU flavor, verify the `v4.2.0-rc1-<sha>@ReSukiSU` string in the image + `fastboot boot` test, then update the §2 table AND the checkout line in `build.sh` + §3. (`KernelSU/` itself is gitignored — the pin lives in these two files.)
 
 **Bumping SUSFS** (current: `v2.3.0`): source a `-4.14`-compatible core, apply over the patched tree, regenerate the patch per §8, update §2.
+
+**Bumping the Fronx release version** (current: `1.0`): edit the `VERSION` file, rebuild both flavors per §11 (new stamps flow automatically), update §10-adjacent references if any.
 
 **Rules:**
 1. Default branch state is ALWAYS vanilla + clean status. No rooted/proot-applied state is ever committed.
@@ -231,14 +247,14 @@ Follow phases in order. Each phase has an exit gate — do not proceed until it 
 ### Phase 1 — Vanilla Build
 1. `make O=out ARCH=arm64 everpal_defconfig` (+ `--disable CONFIG_KSU` + `olddefconfig` if the tree carries KSU lines).
 2. Full build with §5 flags (`LD="ld.lld"` mandatory, §4 trap).
-3. Verify: `Linux version 4.14.357-Aqua` in image, **zero** KSU/SUSFS symbols.
-- **Gate:** `Image.gz` (~17 MB) + exit 0. Package `AquaKernel-<ver>.zip` (AnyKernel3, no dtb).
+3. Verify: `Linux version 4.14.357-FronxKernel_<IST>` in image, **zero** KSU/SUSFS symbols.
+- **Gate:** `Image.gz` (~17 MB) + exit 0. Package `FronxKernel-<ver>_<IST>.zip` (AnyKernel3, no dtb).
 
 ### Phase 2 — Rooted Build
 1. Apply patch (`--exclude=.gitignore`), `olddefconfig`, confirm `CONFIG_KSU=y` + `CONFIG_KSU_SUSFS=y`.
 2. Incremental rebuild with §5 flags.
 3. Verify: ReSukiSU version string matches §2 pin, SUSFS version string matches §2, all 7 hook checks `found` in log with **zero** "build maybe broken" warnings.
-- **Gate:** `Image.gz` verified. Package `AquaKernel_ResukiSU_SusFS-<ver>.zip`.
+- **Gate:** `Image.gz` verified. Package `FronxKernel_ResukiSU_SusFS-<ver>_<IST>.zip`.
 
 ### Phase 3 — Boot Image
 1. Unpack PI-X base (`Project_Infinity-X-3.12.img`, header v2) → repack with new kernel, same ramdisk/dtb/cmdline → AVB `add_hash_footer` (testkey, unlocked bootloader only).
@@ -253,7 +269,7 @@ Follow phases in order. Each phase has an exit gate — do not proceed until it 
 ### Phase 5 — Close-Out
 1. Revert to vanilla (`git apply -R --exclude=.gitignore`), confirm clean status.
 2. Record artifacts + md5s in `out/REPORT.md`.
-- **Gate:** tree vanilla + clean. Push `frontlxox` only from this state.
+- **Gate:** tree vanilla + clean. Push to the FrontlXOX fork only from this state (verify remote name first).
 
 ---
 
@@ -272,7 +288,7 @@ Class-V commits directly; Class-R through the apply → edit → regenerate → 
 Both flavors build clean (§11 Phases 1–2 abbreviated: version strings + hook-check log), KSU flavor passes Phase-4 device validation. No validation, no release.
 
 ### Phase 4 — Release
-Name zips per convention, update benchmark compare URLs across docs on any new record, write release notes in Addster's format (subsystem sections + credits), tag `AquaVX.Y`, extend the §10 table.
+Name zips per convention (`FronxKernel-<ver>_<IST>`, `FronxKernel_ResukiSU_SusFS-<ver>_<IST>`), update benchmark compare URLs across docs on any new record, write release notes in Addster's format (subsystem sections + credits), tag `FronxVX.Y` (confirm convention at first release — never reuse Addster's `AquaVX.Y` tags), extend the §10 table.
 
 ### Phase 5 — Close-Out
-Vanilla + clean tree, push `frontlxox`, update the EverpalTweaks superproject submodule pointer if it tracks this tree, record in `out/REPORT.md`.
+Vanilla + clean tree, push to the FrontlXOX fork (check `git remote -v` for whether it is named `origin` or `frontlxox`), update the EverpalTweaks superproject submodule pointer if it tracks this tree, record in `out/REPORT.md`.
