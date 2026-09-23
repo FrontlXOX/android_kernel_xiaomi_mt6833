@@ -203,6 +203,18 @@ git add ResukiSU-SusFS.patch && git commit -m "🦋 [FEAT]: update ResukiSU-SusF
 
 **Bumping the ReSukiSU driver pin** (current: `239e1e88` / v4.2.0-rc3): `git -C KernelSU checkout <new-sha>`, rebuild KSU flavor, verify the `v4.2.0-<tag>-<sha>@ReSukiSU` string in the image + `fastboot boot` test, then update the §2 table AND the checkout line in `build.sh` + §3. (`KernelSU/` itself is gitignored — the pin lives in these two files.)
 
+### Fronx Baked Defaults (vs Aqua V3.4 baseline)
+
+Small Class-V defaults that survive boot untouched (verified live on-device):
+
+| Default | Value | Why kernel-side is correct |
+| :--- | :--- | :--- |
+| `accdet plugout_deb` | forced `100` in `mt6359/accdet.c` | bootloader supplies its own dtb — the dts edit can never take effect; driver override is the only path |
+| `sched_big_task_rotation` | default on (`eas_plus.c`) | no vendor writer — holds from boot |
+| `DEFAULT_PM_DVFS_PERIOD` | `50` (`mali_kbase_config_defaults.h`, no MTK override) | wins early evaluation; Power HAL still reverts later → module `chmod` lock holds it |
+
+**Rule learned the hard way:** before baking ANY default, grep vendor init (`/vendor/etc/init/`) for that node. If vendor or a HAL writes it (`sched_migration_cost_ns` → vendor's 200000, schedutil rates → Power HAL), the kernel default is dead code and the tunable belongs to the module layer. Two reversions already taken on this rule — check first, bake second.
+
 **Bumping SUSFS** (current: `v2.3.0`): source a `-4.14`-compatible core, apply over the patched tree, regenerate the patch per §8, update §2.
 
 **Bumping the Fronx release version** (current: `1.0`): edit the `VERSION` file, rebuild both flavors per §11 (new stamps flow automatically), update §10-adjacent references if any.
