@@ -1776,7 +1776,7 @@ struct task_rotate_work {
 
 static DEFINE_PER_CPU(struct task_rotate_work, task_rotate_works);
 struct task_rotate_reset_uclamp_work task_rotate_reset_uclamp_works;
-unsigned int sysctl_sched_rotation_enable;
+unsigned int sysctl_sched_rotation_enable = 1;
 bool set_uclamp;
 
 void set_sched_rotation_enable(bool enable)

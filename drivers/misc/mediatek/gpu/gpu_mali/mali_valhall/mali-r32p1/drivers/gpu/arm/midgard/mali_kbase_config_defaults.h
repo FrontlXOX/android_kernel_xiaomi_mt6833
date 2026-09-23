@@ -88,7 +88,7 @@ enum {
  * Default period for DVFS sampling (can be overridden by platform header)
  */
 #ifndef DEFAULT_PM_DVFS_PERIOD
-#define DEFAULT_PM_DVFS_PERIOD 100 /* 100ms */
+#define DEFAULT_PM_DVFS_PERIOD 50 /* 50ms (Fronx: 2x faster 3D-load reaction vs stock 100ms) */
 #endif
 
 /**
