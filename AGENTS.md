@@ -29,7 +29,7 @@ The repository provides a dual-state architecture supporting both pure vanilla b
 
 | Component | Specification |
 | :--- | :--- |
-| **Driver Implementation** | **ReSukiSU** (commit `f1dd81dc96d7f3f6691e6ac8b50fba9ae8a2f17c`, version code `35119`, version `v4.2.0-rc1`) |
+| **Driver Implementation** | **ReSukiSU** (commit `239e1e8871b8fcd51a6e5b3002e0ba522fdd99fb`, version code `35171`, version `v4.2.0-rc3`) |
 | **Stealth Engine** | **SUSFS v2.3.0** (`#define SUSFS_VERSION "v2.3.0"`) |
 | **Hook Type** | SuSFS Inline Hooks (zero compile warnings, no deprecated manual hook guards) |
 | **Sub-options Enabled** | `SUS_PATH`, `SUS_MOUNT`, `SUS_KSTAT`, `SPOOF_UNAME`, `ENABLE_LOG`, `HIDE_KSU_SUSFS_SYMBOLS`, `SPOOF_CMDLINE_OR_BOOTCONFIG`, `OPEN_REDIRECT`, `SUS_MAP` |
@@ -54,8 +54,8 @@ Product identity (Fronx) lives in a second one-shot patch so vanilla stays Addst
 
 #### To Apply Root Subsystems (ReSukiSU + SUSFS v2.3.0):
 ```bash
-# 1. Ensure the ReSukiSU driver exists at verified commit f1dd81dc:
-[ ! -d KernelSU ] && git clone https://github.com/ReSukiSU/ReSukiSU KernelSU && git -C KernelSU checkout f1dd81dc
+# 1. Ensure the ReSukiSU driver exists at verified commit 239e1e88 (v4.2.0-rc3):
+[ ! -d KernelSU ] && git clone https://github.com/ReSukiSU/ReSukiSU KernelSU && git -C KernelSU checkout 239e1e8871b8fcd51a6e5b3002e0ba522fdd99fb
 
 # 2. Apply the patch (.gitignore hunks are pre-kept in-tree, so exclude it):
 git apply --exclude=.gitignore ResukiSU-SusFS.patch
@@ -201,7 +201,7 @@ git add ResukiSU-SusFS.patch && git commit -m "🦋 [FEAT]: update ResukiSU-SusF
 
 ## 9. Version Bumps & Inviolable Rules
 
-**Bumping the ReSukiSU driver pin** (current: `f1dd81dc`): `git -C KernelSU checkout <new-sha>`, rebuild KSU flavor, verify the `v4.2.0-rc1-<sha>@ReSukiSU` string in the image + `fastboot boot` test, then update the §2 table AND the checkout line in `build.sh` + §3. (`KernelSU/` itself is gitignored — the pin lives in these two files.)
+**Bumping the ReSukiSU driver pin** (current: `239e1e88` / v4.2.0-rc3): `git -C KernelSU checkout <new-sha>`, rebuild KSU flavor, verify the `v4.2.0-<tag>-<sha>@ReSukiSU` string in the image + `fastboot boot` test, then update the §2 table AND the checkout line in `build.sh` + §3. (`KernelSU/` itself is gitignored — the pin lives in these two files.)
 
 **Bumping SUSFS** (current: `v2.3.0`): source a `-4.14`-compatible core, apply over the patched tree, regenerate the patch per §8, update §2.
 
@@ -227,7 +227,7 @@ Source: release notes on `Addster09/android_kernel_xiaomi_mt6833`. Our baseline 
 | **V3.1** | 2026-04-19 | Clang 22 toolchain; merged `v4.14.357-openela`; GPU sysfs exposed (frequency control); GPU security patches; dropped MTK memtrack; ReSukiSU v4.1.0 + SUSFS v2.1.0. | GPU sysfs nodes are the EverpalTweaks thermal/GED interface — keep them stable. openela merge = security baseline; track future openela tags. |
 | **V3.2** | 2026-05-08 | A76-targeted compiler opts; TCP-CC + BBR default re-affirmed; ARM64 crypto extensions; high-overhead debug trimmed. | Perf headroom mostly extracted here — further gains now come from scheduling/thermal, not flags. |
 | **V3.3** | 2026-07-05 | Random-reboot fixes; frequency stability; ReSukiSU update + SUSFS v2.2.0; hotspot fix (PortEdition). | If reboots recur, `git log` V3.2→V3.3 first — the fix may already exist upstream. |
-| **V3.4** | 2026-09-10 | **Our baseline.** input_suspend node (charge limiting); WALT enabled; 4.19 binder backport; Clang crypto/CRC/RCpc/RDM opts; statx attrs, clone3, cgroup-prio backports; ReSukiSU (f1dd81dc) + SUSFS v2.3.0. | Current frontier. Next candidates: newer openela merges, SUSFS updates (see §9), scheduler tunables around WALT. |
+| **V3.4** | 2026-09-10 | **Our baseline** (48 commits): input_suspend node; WALT on; 4.19 binder checkout + fix; Clang crypto/CRC/RCpc/RDM + A76 opts; statx/clone3/cgroup-prio backports; Maple scheduler **removed** (back to mq-deadline); BPF-5.10 subsystem merge; ReSukiSU (f1dd81dc) + SUSFS v2.3.0. | Current frontier. Next: openela merges, SUSFS updates (§9), WALT tunables. Maple removal = I/O behavior changed wholesale — re-benchmark any storage claim against pre-3.4 numbers. |
 
 **How to use this table:** before starting any kernel improvement, find the release that last touched that subsystem and read its tag diff (`git log AquaVX..AquaVY -- <path>`) — prior art and prior fixes live there, not in chat history.
 

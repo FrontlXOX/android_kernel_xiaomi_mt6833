@@ -91,7 +91,7 @@ if [[ "$INCLUDE_KSU" = true && ! -f out/.ksu_applied ]]; then
     echo "Including ReSukiSU + SUSFS v2.3.0!"
     if [ ! -d KernelSU ]; then
         git clone https://github.com/ReSukiSU/ReSukiSU KernelSU
-        git -C KernelSU checkout f1dd81dc
+        git -C KernelSU checkout 239e1e8871b8fcd51a6e5b3002e0ba522fdd99fb
     fi
     if [ -f ResukiSU-SusFS.patch ]; then
         git apply --exclude=.gitignore ResukiSU-SusFS.patch
