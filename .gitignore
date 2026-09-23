@@ -124,3 +124,7 @@ all.config
 
 # fetched Android config fragments
 kernel/configs/android-*.cfg
+out/
+KernelSU/
+!ResukiSU-SusFS.patch
+!Branding.patch

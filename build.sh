@@ -13,9 +13,10 @@ rm -rf vmlinux* System.map modules.builtin*
 rm -f Module.symvers modules.order
 rm -rf scripts/kconfig/.tmp*
 
-# Date/Time
+# Date/Time (IST) and version (from VERSION file, bumped per release)
 SECONDS=0
-DATE=$(date '+%Y%m%d-%H%M')
+DT=$(TZ=Asia/Kolkata date '+%Y%m%d-%H%M')
+VERSION=$(cat VERSION)
 
 # Toolchain
 TC_DIR="$HOME/toolchains/ZyC-clang-22.0.0"
@@ -24,7 +25,6 @@ CURRENT_DIR=$(pwd)
 # Device Configs
 DEVICE="everpal"
 DEFCONFIG="${DEVICE}_defconfig"
-ZIPNAME="AquaKernel-${DATE}.zip"
 
 # Ensure the toolchain is available
 if [ ! -d "$TC_DIR" ]; then
@@ -66,24 +66,38 @@ done
 # Perform clean build if specified
 [ "$CLEAN_BUILD" = true ] && rm -rf out
 
+# Zip names (per flavor, IST stamp shared by all artifacts of this run)
+if [[ "$INCLUDE_KSU" = true ]]; then
+    ZIPNAME="FronxKernel_ResukiSU_SusFS-${VERSION}_${DT}.zip"
+else
+    ZIPNAME="FronxKernel-${VERSION}_${DT}.zip"
+fi
+
+# Branding applies to both flavors; KSU patch only with --with-ksu (order: KSU first, branding last)
+APPLIED_KSU=false
+APPLIED_BRANDING=false
 [ -f out/.ksu_applied ] && echo "Including KernelSU Next!"
 
 # Include KernelSU if specified
 if [[ "$INCLUDE_KSU" = true && ! -f out/.ksu_applied ]]; then
-    echo "Including KernelSU Next!"
-    curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
-    git clone https://github.com/JackA1ltman/NonGKI_Kernel_Build_2nd.git --depth=1 SU_patch
-    for patch in SU_patch/Patches/*sh; do
-        bash $patch
-    done
-    patch -p1 < SU_patch/Patches/Patch/susfs_patch_to_4.14.patch
-    wget https://raw.githubusercontent.com/Addster09/EverpalPatches/main/KSUPatches/defconfig-Enable-KSU-and-SUSFS.patch
-    wget https://raw.githubusercontent.com/Addster09/EverpalPatches/main/KSUPatches/susfs_patch_taskmmu.patch
-    patch -p1 < defconfig-Enable-KSU-and-SUSFS.patch
-    patch -p1 < susfs_patch_taskmmu.patch
-    rm -rf defconfig-Enable-KSU-and-SUSFS.patch susfs_patch_taskmmu.patch
-    rm -rf SU_patch
+    echo "Including ReSukiSU + SUSFS v2.3.0!"
+    if [ ! -d KernelSU ]; then
+        git clone https://github.com/ReSukiSU/ReSukiSU KernelSU
+        git -C KernelSU checkout f1dd81dc
+    fi
+    if [ -f ResukiSU-SusFS.patch ]; then
+        git apply --exclude=.gitignore ResukiSU-SusFS.patch
+        APPLIED_KSU=true
+    fi
+    mkdir -p out
     touch out/.ksu_applied
+fi
+
+# Branding (both flavors)
+if [ -f Branding.patch ]; then
+    echo "Applying Fronx branding!"
+    git apply Branding.patch
+    APPLIED_BRANDING=true
 fi
 
 # Compilation process
@@ -96,11 +110,13 @@ if \
 	make -j$(nproc --all) O=out \
 	ARCH=arm64 \
 	CC="ccache clang" \
+	LD="ld.lld" \
 	LLVM=1 \
 	LLVM_IAS=1 \
 	CROSS_COMPILE=aarch64-linux-gnu- \
 	CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
         KCFLAGS="-Wno-error=default-const-init-var-unsafe" \
+	FROnxDT="$DT" \
 	Image.gz dtbs; \
 	then
 
@@ -109,8 +125,16 @@ if \
     # Clone AnyKernel3 and create zip
     git clone -q --depth=1 https://github.com/Addster09/AnyKernel3 AnyKernel3
     cp out/arch/arm64/boot/Image.gz AnyKernel3
+    sed -i 's/^kernel.string=.*/kernel.string=Fronx Kernel by FrontlXOX/' AnyKernel3/anykernel.sh
     (cd AnyKernel3 && zip -r9 "../$ZIPNAME" * -x '*.git*' README.md '*placeholder')
     rm -rf AnyKernel3 
+
+    # Revert to vanilla default (reverse order of application)
+    [ "$APPLIED_BRANDING" = true ] && git apply -R Branding.patch
+    if [ "$APPLIED_KSU" = true ]; then
+        git apply -R --exclude=.gitignore ResukiSU-SusFS.patch
+        rm -f out/.ksu_applied
+    fi 
 
     echo -e "\nCompleted in $((SECONDS / 60)) minute(s) and $((SECONDS % 60)) second(s)!"
     echo "Zip: $ZIPNAME"

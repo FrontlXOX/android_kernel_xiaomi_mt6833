@@ -1,0 +1,13 @@
+diff --git a/Makefile b/Makefile
+index d1a14c89dbc7..d05550f818a5 100644
+--- a/Makefile
++++ b/Makefile
+@@ -2,7 +2,7 @@
+ VERSION = 4
+ PATCHLEVEL = 14
+ SUBLEVEL = 357
+-EXTRAVERSION = -Aqua
++EXTRAVERSION = -FronxKernel$(if $(FROnxDT),_$(FROnxDT))
+ NAME = Petit Gorille
+ 
+ # *DOCUMENTATION*
