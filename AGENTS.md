@@ -95,7 +95,7 @@ git apply -R --exclude=.gitignore ResukiSU-SusFS.patch
 # Clean build
 ./build.sh --clean
 ```
-Version comes from the `VERSION` file (current: `1.0`, bump per release); timestamps are IST, one stamp shared by all artifacts of a run. `build.sh` applies patches pre-build and reverts to vanilla post-build automatically.
+Version comes from the `VERSION` file (current: `1.0`, bump per release); timestamps are IST, one stamp shared by all artifacts of a run. `build.sh` applies patches pre-build and reverts to vanilla post-build automatically. **Every run produces both artifacts** (when the PI-X base exists in EverpalTweaks `out/`): the AnyKernel3 zip **and** the AVB-signed `boot.img`, both delivered to EverpalTweaks `out/`. On build failure the tree is left patched for inspection — revert manually per §3.
 
 ### Manual Build Instructions
 ```bash
@@ -132,8 +132,7 @@ make -j$(nproc) O=out \
 1. **AnyKernel3 Zip:**
    - Package `out/arch/arm64/boot/Image.gz` with AnyKernel3 template targeting partition `boot`.
 2. **Flashable Signed Boot Image (`boot.img`):**
-   - Unpack base stock boot image (`Project_Infinity-X-3.12.img` / Android 16 base, header version 2).
-   - Repack kernel using `mkbootimg.py` and re-sign with `avbtool.py add_hash_footer --algorithm SHA256_RSA2048`.
+   - Built automatically by `build.sh` from the just-packed zip (PI-X base + `main.py` repack + AVB `add_hash_footer`). Manual fallback: unpack base stock boot image (`Project_Infinity-X-3.12.img` / Android 16 base, header version 2), repack kernel using `mkbootimg.py` and re-sign with `avbtool.py add_hash_footer --algorithm SHA256_RSA2048`.
 
 ---
 

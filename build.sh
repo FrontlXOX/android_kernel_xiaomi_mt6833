@@ -66,12 +66,20 @@ done
 # Perform clean build if specified
 [ "$CLEAN_BUILD" = true ] && rm -rf out
 
-# Zip names (per flavor, IST stamp shared by all artifacts of this run)
+# Zip + image names (per flavor, IST stamp shared by all artifacts of this run)
 if [[ "$INCLUDE_KSU" = true ]]; then
     ZIPNAME="FronxKernel_ResukiSU_SusFS-${VERSION}_${DT}.zip"
 else
     ZIPNAME="FronxKernel-${VERSION}_${DT}.zip"
 fi
+IMGNAME="${ZIPNAME%.zip}.img"
+
+# Locate the EverpalTweaks checkout root (walk up: tree root has no src//out pair)
+REPO_ROOT="$CURRENT_DIR"
+for _ in 1 2 3 4 5 6 7 8; do
+  [ -f "$REPO_ROOT/AGENTS.md" ] && [ -d "$REPO_ROOT/src" ] && [ -d "$REPO_ROOT/out" ] && break
+  REPO_ROOT="$(dirname "$REPO_ROOT")"
+done
 
 # Branding applies to both flavors; KSU patch only with --with-ksu (order: KSU first, branding last)
 APPLIED_KSU=false
@@ -129,6 +137,19 @@ if \
     (cd AnyKernel3 && zip -r9 "../$ZIPNAME" * -x '*.git*' README.md '*placeholder')
     rm -rf AnyKernel3 
 
+    # Build flashable boot.img from the zip (needs PI-X base in EverpalTweaks out/)
+    BASE_IMG="$REPO_ROOT/out/Firmwares/Project_Infinity-X-3.12.img"
+    if [ -f "$BASE_IMG" ]; then
+        echo -e "\nBuilding boot.img ...\n"
+        python3 "$REPO_ROOT/src/modules/ResukiSU/main.py" \
+            -k "$CURRENT_DIR/$ZIPNAME" -b "$BASE_IMG" -o "$REPO_ROOT/out/$IMGNAME"
+    else
+        echo "PI-X base not found ($BASE_IMG) — skipping boot.img."
+    fi
+
+    # Deliver both artifacts to EverpalTweaks out/
+    mv -f "$CURRENT_DIR/$ZIPNAME" "$REPO_ROOT/out/" 
+
     # Revert to vanilla default (reverse order of application)
     [ "$APPLIED_BRANDING" = true ] && git apply -R Branding.patch
     if [ "$APPLIED_KSU" = true ]; then
@@ -137,7 +158,8 @@ if \
     fi 
 
     echo -e "\nCompleted in $((SECONDS / 60)) minute(s) and $((SECONDS % 60)) second(s)!"
-    echo "Zip: $ZIPNAME"
+    echo "Zip: $REPO_ROOT/out/$ZIPNAME"
+    [ -f "$REPO_ROOT/out/$IMGNAME" ] && echo "Img: $REPO_ROOT/out/$IMGNAME"
 else
     echo -e "\nCompilation failed!"
 fi
