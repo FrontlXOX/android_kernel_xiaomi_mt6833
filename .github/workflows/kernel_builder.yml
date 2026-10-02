@@ -37,11 +37,12 @@ jobs:
     runs-on: ubuntu-22.04
     permissions:
       contents: write
+    if: github.event.inputs.variant == 'Both' || github.event.inputs.variant == matrix.variant || (!github.event.inputs.variant && matrix.variant == 'Root')
 
     strategy:
       fail-fast: false
       matrix:
-        variant: ${{ fromJSON(github.event.inputs.variant == 'Both' && '["Root", "Vanilla"]' || format('["{0}"]', github.event.inputs.variant || 'Root')) }}
+        variant: [Root, Vanilla]
 
     steps:
       - name: Check Out Repository
