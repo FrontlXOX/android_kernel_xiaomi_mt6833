@@ -4,7 +4,10 @@
 # Target: Xiaomi POCO M4 Pro 5G / Redmi Note 11S 5G (everpal)
 # Maintainer: FrontlXOX
 # Architecture: MediaTek Dimensity 810 (MT6833P / Linux 4.14.357-Fronx)
-# Embedded Root: ReSukiSU v4.2.0-rc3 + SuSFS v2.3.00 (Hardlocked)
+# Usage:
+#   ./build.sh            -> Builds 100% Root Edition (ReSukiSU + SuSFS) [Default]
+#   ./build.sh --vanilla  -> Builds Vanilla Edition (Pure Stock / Non-Root)
+#                            (Auto-reverts tree & config to Root Default post-run)
 # ==============================================================================
 
 # Pre-build cleanup
@@ -21,15 +24,34 @@ CUSTOM_TC=""
 OUTPUT_DIR=""
 DEVICE="everpal"
 CLEAN_BUILD=false
+IS_VANILLA=false
 CURRENT_DIR=$(pwd)
 DATE=$(date '+%Y%m%d-%H%M')
 DEFCONFIG="${DEVICE}_defconfig"
 
+# Automatic state restoration trap: ensures the tree always reverts to 100% root default
+cleanup_and_restore() {
+    local rc=$?
+    trap - EXIT INT TERM
+    rm -rf AnyKernel3
+    if [ "$IS_VANILLA" = true ]; then
+        echo -e "\n[!] Auto-reverting configuration to 100% Root Default (${DEFCONFIG})..."
+        make O=out ARCH=arm64 "$DEFCONFIG" >/dev/null 2>&1
+    fi
+    rm -f .config .config.old
+    exit $rc
+}
+trap cleanup_and_restore EXIT INT TERM
+
 # Process options
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --clean)
+        --clean|-c)
             CLEAN_BUILD=true
+            shift
+            ;;
+        --vanilla|-v)
+            IS_VANILLA=true
             shift
             ;;
         --toolchains)
@@ -40,7 +62,7 @@ while [[ $# -gt 0 ]]; do
             CUSTOM_TC="${1#*=}"
             shift
             ;;
-        --output)
+        --output|-o)
             OUTPUT_DIR="$2"
             shift 2
             ;;
@@ -55,7 +77,15 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-ZIPNAME="FronxKernel-${DATE}.zip"
+if [ "$IS_VANILLA" = true ]; then
+    ZIPNAME="FronxKernel-Vanilla-${DATE}.zip"
+    VARIANT_NAME="Vanilla"
+    VARIANT_DESC="Vanilla / Pure Stock"
+else
+    ZIPNAME="FronxKernel-${DATE}.zip"
+    VARIANT_NAME="Root"
+    VARIANT_DESC="Root-Only / ReSukiSU + SuSFS"
+fi
 
 # Toolchain directory resolution
 if [ -n "$CUSTOM_TC" ]; then
@@ -92,9 +122,10 @@ export LD=ld.lld
 
 echo
 echo "=================================================="
-echo " FronxKernel Root Suite (Dimensity 810 / everpal)"
+echo " FronxKernel ($VARIANT_DESC)"
 echo " Maintainer: FrontlXOX"
 echo " Compiler:   $TC_DIR"
+echo " Target:     $ZIPNAME"
 echo "=================================================="
 clang --version
 echo
@@ -112,13 +143,22 @@ fi
 [ "$CLEAN_BUILD" = true ] && rm -rf out
 mkdir -p out
 
-# Ensure root architecture is permanently linked
+# Ensure root architecture is linked if present
 if [ ! -L drivers/kernelsu ] && [ -d KernelSU/kernel ]; then
     ln -sf ../KernelSU/kernel drivers/kernelsu
 fi
 
 # Apply defconfig
 make O=out ARCH=arm64 "$DEFCONFIG"
+
+# If Vanilla mode is requested, decouple root subsystem
+if [ "$IS_VANILLA" = true ]; then
+    echo -e "\n[!] Applying Vanilla configuration: Decoupling ReSukiSU and SuSFS..."
+    scripts/config --file out/.config --disable KSU
+    scripts/config --file out/.config --disable KSU_SUSFS
+    scripts/config --file out/.config --disable KSU_MULTI_MANAGER_SUPPORT
+    make O=out ARCH=arm64 olddefconfig
+fi
 
 echo -e "\nStarting FronxKernel compilation...\n"
 if \
@@ -142,8 +182,112 @@ if \
     # Inject kernel image
     cp out/arch/arm64/boot/Image.gz AnyKernel3/
 
-    # Write custom FronxKernel branding banner
-    cat << "EOF" > AnyKernel3/banner
+    # Write custom FronxKernel branding banner, version, and installer
+    if [ "$IS_VANILLA" = true ]; then
+        cat << "EOF" > AnyKernel3/banner
+================================================
+ ███████╗██████╗  ██████╗ ███╗   ██╗██╗  ██╗
+ ██╔════╝██╔══██╗██╔═══██╗████╗  ██║╚██╗██╔╝
+ █████╗  ██████╔╝██║   ██║██╔██╗ ██║ ╚███╔╝ 
+ ██╔══╝  ██╔══██╗██║   ██║██║╚██╗██║ ██╔██╗ 
+ ██║     ██║  ██║╚██████╔╝██║ ╚████║██╔╝ ██╗
+ ╚═╝     ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝  ╚═╝
+   F R O N X   K E R N E L   V A N I L L A
+================================================
+EOF
+
+        cat << EOF > AnyKernel3/version
+FronxKernel 4.14.357-Fronx (Vanilla / Pure Stock)
+Target: Xiaomi POCO M4 Pro 5G / Redmi Note 11S 5G (everpal)
+Build Date: $(date '+%Y-%m-%d %H:%M')
+Author: FrontlXOX
+EOF
+
+        cat << "EOF" > AnyKernel3/anykernel.sh
+### AnyKernel3 Ramdisk Mod Script
+## FronxKernel Project by FrontlXOX
+## Vanilla Edition (Pure Stock / Non-Root)
+
+properties() { '
+kernel.string=Fronx Kernel for Xiaomi POCO M4 Pro 5G / Redmi Note 11S 5G
+do.devicecheck=0
+do.modules=0
+do.systemless=1
+do.cleanup=1
+do.cleanuponabort=1
+device.name1=everpal
+device.name2=evergo
+'; }
+
+# boot shell variables
+block=boot;
+is_slot_device=auto;
+ramdisk_compression=auto;
+patch_vbmeta_flag=auto;
+no_block_display=1;
+
+# import functions/variables and setup patching
+. tools/ak3-core.sh;
+
+ui_print " "
+ui_print "================================================"
+ui_print "   F R O N X   K E R N E L   V A N I L L A"
+ui_print "================================================"
+ui_print " • Target:    Xiaomi POCO M4 Pro 5G (everpal)"
+ui_print " • Platform:  MediaTek Dimensity 810 (MT6833P)"
+ui_print " • Kernel:    Linux 4.14.357-Fronx PREEMPT SMP"
+ui_print " • Variant:   Vanilla Edition (Pure Stock)"
+ui_print " • Author:    FrontlXOX"
+ui_print " • Toolchain: ZyC Clang 22.0.0 (LLVM + ThinLTO)"
+ui_print "------------------------------------------------"
+
+# Pre-flight environment diagnostics
+ui_print " [i] Pre-flight Environment Inspection..."
+SLOT=$(find_slot 2>/dev/null)
+if [ -n "$SLOT" ]; then
+  ui_print "     -> Active Slot:        $SLOT"
+else
+  ui_print "     -> Active Slot:        A-only / Single"
+fi
+
+DEVICE=$(getprop ro.product.device 2>/dev/null || getprop ro.build.product 2>/dev/null)
+[ -n "$DEVICE" ] && ui_print "     -> Target Device:      $DEVICE"
+
+SDK=$(getprop ro.build.version.sdk 2>/dev/null)
+REL=$(getprop ro.build.version.release 2>/dev/null)
+if [ -n "$REL" ]; then
+  ui_print "     -> Android OS:         Android $REL (API $SDK)"
+fi
+
+ui_print " "
+ui_print " [+] Dumping & splitting boot partition..."
+split_boot;
+
+ui_print " [+] Injecting Fronx Kernel (Image.gz)..."
+flash_boot;
+
+if [ -f dtb.img ] || [ -f dtbo.img ]; then
+  ui_print " [+] Flashing Device Tree overlays..."
+  flash_dtbo;
+fi
+
+ui_print " "
+ui_print "================================================"
+ui_print "  [✓] FRONXKERNEL FLASH COMPLETED SUCCESSFULLY!"
+ui_print "================================================"
+ui_print " Subsystems Status:"
+ui_print " • Root Solution:    None (Vanilla Stock)"
+ui_print " • SuSFS Engine:     Disabled"
+ui_print " • Energy Model:     EAS / Schedutil Optimized"
+ui_print " • Memory Profile:   Zone Normal Reclaim Ready"
+ui_print " • Interconnect:     CoreLink CCI Uncapped"
+ui_print "------------------------------------------------"
+ui_print " Please reboot your device to boot FronxKernel!"
+ui_print "================================================"
+ui_print " "
+EOF
+    else
+        cat << "EOF" > AnyKernel3/banner
 ================================================
  ███████╗██████╗  ██████╗ ███╗   ██╗██╗  ██╗
  ██╔════╝██╔══██╗██╔═══██╗████╗  ██║╚██╗██╔╝
@@ -155,16 +299,14 @@ if \
 ================================================
 EOF
 
-    # Write custom FronxKernel version info
-    cat << EOF > AnyKernel3/version
+        cat << EOF > AnyKernel3/version
 FronxKernel 4.14.357-Fronx (Root-Only / ReSukiSU + SuSFS)
 Target: Xiaomi POCO M4 Pro 5G / Redmi Note 11S 5G (everpal)
 Build Date: $(date '+%Y-%m-%d %H:%M')
 Author: FrontlXOX
 EOF
 
-    # Write custom FronxKernel anykernel.sh installer
-    cat << "EOF" > AnyKernel3/anykernel.sh
+        cat << "EOF" > AnyKernel3/anykernel.sh
 ### AnyKernel3 Ramdisk Mod Script
 ## FronxKernel Project by FrontlXOX
 ## Root-Only Edition: ReSukiSU v4.2.0-rc3 + SuSFS v2.3.0
@@ -248,13 +390,17 @@ ui_print " Please reboot your device to boot FronxKernel!"
 ui_print "================================================"
 ui_print " "
 EOF
+    fi
 
     (cd AnyKernel3 && zip -r9 "$ZIP_DEST" * -x '*.git*' README.md '*placeholder')
     rm -rf AnyKernel3
 
     echo -e "\nCompleted in $((SECONDS / 60)) minute(s) and $((SECONDS % 60)) second(s)!"
-    echo "Zip: $ZIP_DEST"
-    [ -n "$OUTPUT_DIR" ] && echo "Output directory: $OUTPUT_DIR_ABS"
+    if [ -n "$OUTPUT_DIR" ]; then
+        echo "Output directory: $OUTPUT_DIR_ABS"
+    fi
+    exit 0
 else
     echo -e "\nCompilation failed!"
+    exit 1
 fi
