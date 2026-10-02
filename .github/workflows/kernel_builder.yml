@@ -1,0 +1,307 @@
+name: FronxKernel Builder
+
+on:
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: 'Kernel Variant to build'
+        required: true
+        type: choice
+        options:
+          - Root
+          - Vanilla
+          - Both
+        default: 'Root'
+      clean_build:
+        description: 'Perform clean build (wipe out/ directory)'
+        required: false
+        type: boolean
+        default: false
+      create_release:
+        description: 'Publish GitHub Release with Image.gz and AnyKernel3 Zip'
+        required: false
+        type: boolean
+        default: true
+      send_telegram:
+        description: 'Send build summary & zip artifact to Telegram'
+        required: false
+        type: boolean
+        default: true
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build ${{ matrix.variant }} Edition
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: ${{ fromJSON(github.event.inputs.variant == 'Both' && '["Root", "Vanilla"]' || format('["{0}"]', github.event.inputs.variant || 'Root')) }}
+
+    steps:
+      - name: Check Out Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Record Build Metadata
+        run: |
+          echo "START_TIME=$(date +%s)" >> $GITHUB_ENV
+          BUILD_DATE=$(date -u +'%Y%m%d-%H%M')
+          echo "BUILD_DATE=${BUILD_DATE}" >> $GITHUB_ENV
+          SHORT_SHA=$(git rev-parse --short=8 HEAD)
+          echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_ENV
+          TAG_NAME="v4.14.357-${{ matrix.variant }}-${BUILD_DATE}"
+          echo "RELEASE_TAG=${TAG_NAME}" >> $GITHUB_ENV
+
+      - name: Optimize Runner Disk Space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift 2>/dev/null || true
+          sudo docker image prune --all --force 2>/dev/null || true
+          df -h /
+
+      - name: Install Build Dependencies & Cross-Compilers
+        run: |
+          sudo apt update
+          DEBIAN_FRONTEND=noninteractive sudo apt install -y --no-install-recommends \
+            bc bison build-essential curl flex git libelf-dev libssl-dev \
+            libncurses5-dev ccache zip unzip wget python3 \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi
+
+      - name: Restore Clang Toolchain Cache
+        id: tc-cache
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/toolchains/ZyC-clang-22.0.0
+          key: ${{ runner.os }}-zyc-clang-22.0.0-20250928
+
+      - name: Pre-Download ZyC Clang 22.0.0 (if cache miss)
+        if: steps.tc-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /home/runner/toolchains/ZyC-clang-22.0.0
+          cd /home/runner/toolchains/ZyC-clang-22.0.0
+          echo "[*] Downloading ZyC Clang 22.0.0..."
+          wget -q --show-progress https://github.com/ZyCromerZ/Clang/releases/download/22.0.0git-20250928-release/Clang-22.0.0git-20250928.tar.gz
+          tar -zxf Clang-22.0.0git-20250928.tar.gz
+          rm -f Clang-22.0.0git-20250928.tar.gz
+          echo "[✓] Toolchain extracted successfully"
+          bin/clang --version
+
+      - name: Setup Compiler Cache (ccache)
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ${{ runner.os }}-ccache-${{ matrix.variant }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-${{ matrix.variant }}-
+            ${{ runner.os }}-ccache-
+
+      - name: Notify Telegram - Build Started
+        if: secrets.TG_BOT_TOKEN != '' && (github.event.inputs.send_telegram != 'false')
+        run: |
+          MSG="🚀 *Starting FronxKernel Build: ${{ matrix.variant }} Edition*
+          ━━━━━━━━━━━━━━━━━━━━
+          📱 *Device:* POCO M4 Pro 5G / Redmi Note 11S 5G (\`everpal\`)
+          ⚙️ *Platform:* MediaTek Dimensity 810 (MT6833P)
+          🌿 *Branch:* \`${{ github.ref_name }}\` (\`${{ env.SHORT_SHA }}\`)
+          🔧 *Variant:* \`${{ matrix.variant }} Edition\`
+          🕒 *Start:* $(date -u +'%Y-%m-%d %H:%M UTC')
+          ━━━━━━━━━━━━━━━━━━━━
+          ⚡ Compilation initiated on GitHub Actions..."
+
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TG_BOT_TOKEN }}/sendMessage" \
+            -d chat_id="${{ secrets.TG_CHAT_ID }}" \
+            --data-urlencode "text=$MSG" \
+            -d parse_mode="Markdown"
+
+      - name: Compile FronxKernel (${{ matrix.variant }} Edition)
+        run: |
+          chmod +x build.sh
+          EXTRA_ARGS=""
+          if [ "${{ github.event.inputs.clean_build }}" = "true" ]; then
+            EXTRA_ARGS="--clean"
+          fi
+
+          if [ "${{ matrix.variant }}" = "Vanilla" ]; then
+            echo "[*] Executing: ./build.sh --vanilla $EXTRA_ARGS"
+            ./build.sh --vanilla $EXTRA_ARGS
+          else
+            echo "[*] Executing: ./build.sh $EXTRA_ARGS"
+            ./build.sh $EXTRA_ARGS
+          fi
+
+      - name: Extract & Verify Artifacts
+        id: pkg
+        run: |
+          ZIP_FILE=$(ls FronxKernel-*.zip 2>/dev/null | head -n 1)
+          if [ -z "$ZIP_FILE" ] || [ ! -f "$ZIP_FILE" ]; then
+            echo "ERROR: AnyKernel3 zip package not found!"
+            exit 1
+          fi
+
+          echo "ZIP_NAME=$(basename $ZIP_FILE)" >> $GITHUB_ENV
+          echo "ZIP_PATH=$(pwd)/$ZIP_FILE" >> $GITHUB_ENV
+          ZIP_SIZE=$(du -h "$ZIP_FILE" | cut -f1)
+          echo "ZIP_SIZE=${ZIP_SIZE}" >> $GITHUB_ENV
+
+          # Extract standalone Image.gz for recovery pipelines (hold_universal_recovery)
+          unzip -p "$ZIP_FILE" Image.gz > ./Image.gz
+          if [ ! -s ./Image.gz ]; then
+            echo "ERROR: Failed to extract Image.gz from $ZIP_FILE!"
+            exit 1
+          fi
+          echo "IMG_PATH=$(pwd)/Image.gz" >> $GITHUB_ENV
+          IMG_SIZE=$(du -h ./Image.gz | cut -f1)
+          echo "IMG_SIZE=${IMG_SIZE}" >> $GITHUB_ENV
+
+          # Copy named variant image for multi-artifact identification
+          cp ./Image.gz ./Image-${{ matrix.variant }}.gz
+          echo "IMG_VARIANT_PATH=$(pwd)/Image-${{ matrix.variant }}.gz" >> $GITHUB_ENV
+
+          # Generate checksums
+          echo "=== FronxKernel Build Checksums (${{ matrix.variant }}) ===" > checksums-${{ matrix.variant }}.txt
+          echo "Build Date: $(date -u +'%Y-%m-%d %H:%M UTC')" >> checksums-${{ matrix.variant }}.txt
+          echo "Commit: ${{ github.sha }}" >> checksums-${{ matrix.variant }}.txt
+          echo "Variant: ${{ matrix.variant }}" >> checksums-${{ matrix.variant }}.txt
+          echo "" >> checksums-${{ matrix.variant }}.txt
+          echo "SHA256 Checksums:" >> checksums-${{ matrix.variant }}.txt
+          sha256sum "$ZIP_FILE" Image.gz Image-${{ matrix.variant }}.gz >> checksums-${{ matrix.variant }}.txt
+          echo "" >> checksums-${{ matrix.variant }}.txt
+          echo "MD5 Checksums:" >> checksums-${{ matrix.variant }}.txt
+          md5sum "$ZIP_FILE" Image.gz Image-${{ matrix.variant }}.gz >> checksums-${{ matrix.variant }}.txt
+          cat checksums-${{ matrix.variant }}.txt
+
+          ZIP_SHA256=$(sha256sum "$ZIP_FILE" | cut -d ' ' -f1)
+          IMG_SHA256=$(sha256sum "./Image.gz" | cut -d ' ' -f1)
+          echo "ZIP_SHA256=${ZIP_SHA256}" >> $GITHUB_ENV
+          echo "IMG_SHA256=${IMG_SHA256}" >> $GITHUB_ENV
+
+          END_TIME=$(date +%s)
+          DURATION=$(( (END_TIME - START_TIME) / 60 ))
+          echo "DURATION=${DURATION}" >> $GITHUB_ENV
+
+      - name: Generate Release Notes
+        run: |
+          {
+            echo "## FronxKernel v4.14.357-Fronx (${{ matrix.variant }} Edition)"
+            echo ""
+            echo "**Target Device:** Xiaomi POCO M4 Pro 5G / Redmi Note 11S 5G (\`everpal\`)"
+            echo "**SoC / Architecture:** MediaTek Dimensity 810 (\`MT6833P\` / AArch64)"
+            echo "**Linux Kernel:** \`4.14.357-Fronx PREEMPT SMP\`"
+            echo "**Compiler:** \`ZyC Clang 22.0.0 (LLVM + ThinLTO)\`"
+            echo "**Variant:** \`${{ matrix.variant }} Edition\`"
+            echo "**Build Date:** \`$(date -u +'%Y-%m-%d %H:%M UTC')\`"
+            echo "**Git Commit:** [\`${{ env.SHORT_SHA }}\`](https://github.com/${{ github.repository }}/commit/${{ github.sha }})"
+            echo ""
+            echo "---"
+            echo ""
+            echo "### Subsystem Architecture"
+            if [ "${{ matrix.variant }}" = "Root" ]; then
+              echo "- **Embedded Root:** ReSukiSU v4.2.0-rc3 (Active)"
+              echo "- **SuSFS Engine:** v2.3.00 Inline Hooks (Path / Mount / Kstat / Map / Cmdline Spoofing)"
+              echo "- **Multi-Manager:** Supported (MKSU, RKSU, KOWSU, SukiSU-Ultra, ReSukiSU)"
+              echo "- **Energy Model:** Schedutil rate-limit uncapped, CoreLink CCI pinned"
+            else
+              echo "- **Root Solution:** Decoupled / None (Pure Stock Non-Root)"
+              echo "- **SuSFS Engine:** Disabled"
+              echo "- **Energy Model:** Schedutil rate-limit uncapped, CoreLink CCI pinned"
+              echo "- **Purity:** 100% Stock Compatibility"
+            fi
+            echo ""
+            echo "---"
+            echo ""
+            echo "### Downstream Recovery Builder Integration (\`hold_universal_recovery\`)"
+            echo "To inject this kernel directly into **OrangeFox / PitchBlack / SkyHawk** recovery builds, use this direct link in \`hold_universal_recovery\` (\`KERNEL_URL\`):"
+            echo "\`\`\`text"
+            echo "https://github.com/${{ github.repository }}/releases/download/${{ env.RELEASE_TAG }}/Image.gz"
+            echo "\`\`\`"
+            echo ""
+            echo "---"
+            echo ""
+            echo "### Checksums"
+            echo "- **\`${{ env.ZIP_NAME }}\`**"
+            echo "  - **Size:** \`${{ env.ZIP_SIZE }}\`"
+            echo "  - **SHA256:** \`${{ env.ZIP_SHA256 }}\`"
+            echo "- **\`Image.gz\`**"
+            echo "  - **Size:** \`${{ env.IMG_SIZE }}\`"
+            echo "  - **SHA256:** \`${{ env.IMG_SHA256 }}\`"
+          } > release_notes.md
+          cat release_notes.md
+
+      - name: Upload Build Artifacts (Actions)
+        uses: actions/upload-artifact@v4
+        with:
+          name: FronxKernel-${{ matrix.variant }}-${{ env.BUILD_DATE }}
+          path: |
+            ${{ env.ZIP_PATH }}
+            ${{ env.IMG_PATH }}
+            ${{ env.IMG_VARIANT_PATH }}
+            checksums-${{ matrix.variant }}.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish GitHub Release
+        if: github.event.inputs.create_release != 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: FronxKernel ${{ matrix.variant }} Edition (${{ env.BUILD_DATE }})
+          body_path: release_notes.md
+          files: |
+            ${{ env.ZIP_PATH }}
+            ${{ env.IMG_PATH }}
+            ${{ env.IMG_VARIANT_PATH }}
+            checksums-${{ matrix.variant }}.txt
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Notify Telegram - Build Success
+        if: success() && secrets.TG_BOT_TOKEN != '' && (github.event.inputs.send_telegram != 'false')
+        run: |
+          CAPTION="🎯 *FronxKernel Build Complete!*
+          ━━━━━━━━━━━━━━━━━━━━
+          📱 *Device:* POCO M4 Pro 5G (\`everpal\`)
+          ⚙️ *Variant:* \`${{ matrix.variant }} Edition\`
+          📦 *Package:* \`${{ env.ZIP_NAME }}\` (\`${{ env.ZIP_SIZE }}\`)
+          🖼️ *Image:* \`Image.gz\` (\`${{ env.IMG_SIZE }}\`)
+          🔐 *SHA256 (Image):* \`${{ env.IMG_SHA256 }}\`
+          ⏱️ *Build Time:* \`${{ env.DURATION }} min\`
+          ━━━━━━━━━━━━━━━━━━━━
+          🔗 [Direct Kernel Image URL](https://github.com/${{ github.repository }}/releases/download/${{ env.RELEASE_TAG }}/Image.gz)
+          ✅ Verified and ready for installation or recovery injection."
+
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TG_BOT_TOKEN }}/sendMessage" \
+            -d chat_id="${{ secrets.TG_CHAT_ID }}" \
+            --data-urlencode "text=$CAPTION" \
+            -d parse_mode="Markdown"
+
+          curl -F document=@"${{ env.ZIP_PATH }}" \
+            -F chat_id="${{ secrets.TG_CHAT_ID }}" \
+            -F caption="📦 Flashable AnyKernel3 Zip: ${{ env.ZIP_NAME }}" \
+            "https://api.telegram.org/bot${{ secrets.TG_BOT_TOKEN }}/sendDocument" || true
+
+      - name: Notify Telegram - Build Failed
+        if: failure() && secrets.TG_BOT_TOKEN != '' && (github.event.inputs.send_telegram != 'false')
+        run: |
+          MSG="❌ *FronxKernel Build Failed!*
+          ━━━━━━━━━━━━━━━━━━━━
+          📱 *Device:* POCO M4 Pro 5G (\`everpal\`)
+          ⚙️ *Variant:* \`${{ matrix.variant }} Edition\`
+          🌿 *Branch:* \`${{ github.ref_name }}\` (\`${{ env.SHORT_SHA }}\`)
+          ⏱️ *Elapsed:* \`$(( ($(date +%s) - START_TIME) / 60 )) min\`
+          ━━━━━━━━━━━━━━━━━━━━
+          ⚠️ Please check GitHub Actions logs for details."
+
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TG_BOT_TOKEN }}/sendMessage" \
+            -d chat_id="${{ secrets.TG_CHAT_ID }}" \
+            --data-urlencode "text=$MSG" \
+            -d parse_mode="Markdown"
