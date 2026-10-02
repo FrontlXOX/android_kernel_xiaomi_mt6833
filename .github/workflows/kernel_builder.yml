@@ -27,22 +27,37 @@ on:
         required: false
         type: boolean
         default: true
-  push:
-    tags:
-      - 'v*'
 
 jobs:
+  setup:
+    name: Prepare Build Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - id: set-matrix
+        name: Determine Build Variants
+        run: |
+          VARIANT="${{ github.event.inputs.variant || 'Root' }}"
+          if [ "$VARIANT" = "Both" ]; then
+            echo 'matrix=["Root", "Vanilla"]' >> $GITHUB_OUTPUT
+          elif [ "$VARIANT" = "Vanilla" ]; then
+            echo 'matrix=["Vanilla"]' >> $GITHUB_OUTPUT
+          else
+            echo 'matrix=["Root"]' >> $GITHUB_OUTPUT
+          fi
+
   build:
     name: Build ${{ matrix.variant }} Edition
+    needs: setup
     runs-on: ubuntu-22.04
     permissions:
       contents: write
-    if: github.event.inputs.variant == 'Both' || github.event.inputs.variant == matrix.variant || (!github.event.inputs.variant && matrix.variant == 'Root')
 
     strategy:
       fail-fast: false
       matrix:
-        variant: [Root, Vanilla]
+        variant: ${{ fromJSON(needs.setup.outputs.matrix) }}
 
     steps:
       - name: Check Out Repository
@@ -105,8 +120,15 @@ jobs:
             ${{ runner.os }}-ccache-
 
       - name: Notify Telegram - Build Started
-        if: secrets.TG_BOT_TOKEN != '' && (github.event.inputs.send_telegram != 'false')
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: |
+          if [ -z "$TG_BOT_TOKEN" ] || [ "${{ github.event.inputs.send_telegram }}" = "false" ]; then
+            echo "[*] Telegram notification skipped"
+            exit 0
+          fi
+
           MSG="🚀 *Starting FronxKernel Build: ${{ matrix.variant }} Edition*
           ━━━━━━━━━━━━━━━━━━━━
           📱 *Device:* POCO M4 Pro 5G / Redmi Note 11S 5G (\`everpal\`)
@@ -117,8 +139,8 @@ jobs:
           ━━━━━━━━━━━━━━━━━━━━
           ⚡ Compilation initiated on GitHub Actions..."
 
-          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TG_BOT_TOKEN }}/sendMessage" \
-            -d chat_id="${{ secrets.TG_CHAT_ID }}" \
+          curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TG_CHAT_ID}" \
             --data-urlencode "text=$MSG" \
             -d parse_mode="Markdown"
 
@@ -266,8 +288,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Notify Telegram - Build Success
-        if: success() && secrets.TG_BOT_TOKEN != '' && (github.event.inputs.send_telegram != 'false')
+        if: success()
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: |
+          if [ -z "$TG_BOT_TOKEN" ] || [ "${{ github.event.inputs.send_telegram }}" = "false" ]; then
+            echo "[*] Telegram notification skipped"
+            exit 0
+          fi
+
           CAPTION="🎯 *FronxKernel Build Complete!*
           ━━━━━━━━━━━━━━━━━━━━
           📱 *Device:* POCO M4 Pro 5G (\`everpal\`)
@@ -280,19 +310,26 @@ jobs:
           🔗 [Direct Kernel Image URL](https://github.com/${{ github.repository }}/releases/download/${{ env.RELEASE_TAG }}/Image.gz)
           ✅ Verified and ready for installation or recovery injection."
 
-          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TG_BOT_TOKEN }}/sendMessage" \
-            -d chat_id="${{ secrets.TG_CHAT_ID }}" \
+          curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TG_CHAT_ID}" \
             --data-urlencode "text=$CAPTION" \
             -d parse_mode="Markdown"
 
           curl -F document=@"${{ env.ZIP_PATH }}" \
-            -F chat_id="${{ secrets.TG_CHAT_ID }}" \
+            -F chat_id="${TG_CHAT_ID}" \
             -F caption="📦 Flashable AnyKernel3 Zip: ${{ env.ZIP_NAME }}" \
-            "https://api.telegram.org/bot${{ secrets.TG_BOT_TOKEN }}/sendDocument" || true
+            "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument" || true
 
       - name: Notify Telegram - Build Failed
-        if: failure() && secrets.TG_BOT_TOKEN != '' && (github.event.inputs.send_telegram != 'false')
+        if: failure()
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: |
+          if [ -z "$TG_BOT_TOKEN" ] || [ "${{ github.event.inputs.send_telegram }}" = "false" ]; then
+            exit 0
+          fi
+
           MSG="❌ *FronxKernel Build Failed!*
           ━━━━━━━━━━━━━━━━━━━━
           📱 *Device:* POCO M4 Pro 5G (\`everpal\`)
@@ -302,7 +339,7 @@ jobs:
           ━━━━━━━━━━━━━━━━━━━━
           ⚠️ Please check GitHub Actions logs for details."
 
-          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TG_BOT_TOKEN }}/sendMessage" \
-            -d chat_id="${{ secrets.TG_CHAT_ID }}" \
+          curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TG_CHAT_ID}" \
             --data-urlencode "text=$MSG" \
             -d parse_mode="Markdown"
